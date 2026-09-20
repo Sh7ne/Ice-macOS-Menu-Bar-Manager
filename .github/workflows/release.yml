@@ -113,12 +113,18 @@ jobs:
           release_flags=(--prerelease=false)
           if [[ "$RELEASE_TAG" == *-preview.* ]]; then
               release_flags=(--prerelease --latest=false)
-              printf '\n%s\n\n%s\n\n%s\n\n%s\n' \
+              version_notes="docs/releases/${RELEASE_TAG#v}.md"
+              if [[ -f "$version_notes" ]]; then
+                  printf '\n' >> "$notes_path"
+                  cat "$version_notes" >> "$notes_path"
+              else
+                  printf '\n%s\n\n%s\n\n%s\n\n%s\n' \
                   'macOS 27 compatibility preview: opt-in app hiding/reveal, system-item visibility settings (including grouped Time Machine / Siri), and settings layout fixes.' \
                   'Known limitations: hiding can also conceal additional system controls and prevent the clock from opening Notification Center. Reveal all sections, disable experimental hiding, or quit Ice to restore normal behavior.' \
                   'Ice Bar, divider dragging, and several legacy reveal modes are unavailable on macOS 27. macOS 14-26 continue to use the legacy backend.' \
                   "Details: https://github.com/$GITHUB_REPOSITORY/blob/$RELEASE_TAG/docs/MACOS-27.md" \
                   >> "$notes_path"
+              fi
           fi
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
