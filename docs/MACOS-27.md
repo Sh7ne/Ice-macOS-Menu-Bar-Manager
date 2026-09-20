@@ -21,10 +21,14 @@ window/divider backend remains in use on macOS 14 through 26.
   if an old divider position was saved. Always-Hidden assignments cannot be
   reliably recovered; review the new layout. Old preferences are not erased.
 - macOS temporarily conceals some additional system extras, including the
-  audio/video controls, and prevents clicking the clock to open Notification
-  Center while hiding is active. Reveal all sections, disable experimental
-  hiding, or quit Ice to restore normal system behavior. This is an inherent
-  limitation of the private assessment API, not full legacy feature parity.
+  audio/video controls, and blocks the clock's Notification Center action
+  while hiding is active. Starting with preview 3, Ice observes a plain date
+  click, briefly releases its own hiding assertion, presses the verified clock
+  Accessibility element, then restores the current hiding policy. Icons can
+  briefly appear during this workaround. Modified clicks, drags, long presses,
+  other menu items, and clicks while already expanded are left untouched.
+  Reveal all sections, disable experimental hiding, or quit Ice if the private
+  API changes or another menu bar manager keeps an assertion active.
 - Applications with unregistered/bundleless helpers or running from transient
   build directories may not obey the allowlist. Use installed applications.
 - Ice Bar, icon search, divider dragging, spacing, hover/empty-area/scroll
@@ -53,7 +57,13 @@ creates a temporary status app, hides/reveals it three times, checks that other
 registered apps and allowlisted system controls remain, and verifies restoration
 of every baseline item. The private API's system side effects apply during the
 brief conceal phases. Do not run during a call, recording, or presentation.
-This test does not claim that Notification Center remains clickable while hidden.
+This test covers hiding, not the date-click relay. The date-click relay also
+needs manual testing: with icons hidden, click the date, confirm Notification
+Center opens and icons rehide, dismiss it, and repeat. Verify that ordinary
+app clicks, modified clicks and expanded-state date clicks retain native behavior.
+The policy test covers menu-band geometry on displays with different origins,
+movement tolerance and long presses. The relay uses no idle polling, active
+event tap, synthesized mouse input, screenshot capture or additional permission.
 
 Quit Ice and other menu bar managers before live tests: concurrent assessment
 assertions can interfere with the allowlist. To test an already-present system
@@ -79,3 +89,8 @@ repository under the existing GPL-3.0 license. See Pelmet's
 [FAQ](https://github.com/fif7y/pelmet/blob/main/docs/FAQ.md) for assessment-mode
 limitations. CompactSlider remains an external MIT-licensed dependency and is
 pinned to 2.1.0 for Xcode 27 compatibility.
+
+The clock workaround was informed by Pelmet's `ClockClickRelay.swift` and
+`AppState.clockClicked`, revision `899e00a92596f32505347298766218683fdc62a3`
+(GPL-3.0). Ice uses a passive mouse monitor and an Accessibility action after
+the physical mouse-up rather than swallowing or replaying mouse events.

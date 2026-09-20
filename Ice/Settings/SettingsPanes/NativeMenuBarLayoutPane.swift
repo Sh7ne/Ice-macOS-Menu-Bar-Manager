@@ -28,7 +28,7 @@ struct NativeMenuBarLayoutPane: View {
                         }
                     }
                 ))
-                Text("While apps are hidden, some system icons and the clock's Notification Center shortcut are unavailable.")
+                Text("Some system icons are unavailable while hidden. Clicking the date briefly reveals icons to open Notification Center, then hides them again.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -61,7 +61,7 @@ struct NativeMenuBarLayoutPane: View {
             Button("Enable") { manager.experimentalHidingEnabled = true }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("macOS may hide additional system icons and disable the clock's Notification Center shortcut. Show all sections or disable this option to restore them.")
+            Text("macOS may hide additional system icons. Ice briefly reveals icons when opening Notification Center from the date. Show all sections or disable this option to restore normal system behavior.")
         }
         .task { await manager.refresh() }
     }

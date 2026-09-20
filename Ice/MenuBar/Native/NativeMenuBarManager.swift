@@ -19,6 +19,7 @@ final class NativeMenuBarManager: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published var experimentalHidingEnabled = UserDefaults.standard.bool(forKey: "NativeMenuBarExperimentalHiding") {
         didSet {
+            clockTask?.cancel()
             UserDefaults.standard.set(experimentalHidingEnabled, forKey: "NativeMenuBarExperimentalHiding")
             applyVisibility()
         }
@@ -33,6 +34,11 @@ final class NativeMenuBarManager: ObservableObject {
     private var lastAllowed: Set<String>?
     private var lastAllowedSystemItems: Set<Int>?
     private var ready = false
+    private let clockReader = NativeClockAccessibility()
+    private var clockMonitor: EventMonitor?
+    private var clockMouseDown: (point: CGPoint, time: TimeInterval)?
+    private var clockTask: Task<Void, Never>?
+    private var isRelayingClock = false
 
     func performSetup(with appState: AppState) {
         self.appState = appState
@@ -62,8 +68,16 @@ final class NativeMenuBarManager: ObservableObject {
         }
         .store(in: &cancellables)
         NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
-            .sink { [weak self] _ in self?.restore() }
+            .sink { [weak self] _ in
+                self?.ready = false
+                self?.clockTask?.cancel()
+                self?.clockMonitor?.stop()
+                self?.restore()
+            }
             .store(in: &cancellables)
+        clockMonitor = .startGlobal(for: [.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.handleClockEvent(event)
+        }
         Task { await refresh() }
     }
 
@@ -122,6 +136,7 @@ final class NativeMenuBarManager: ObservableObject {
 
     private func applyVisibility() {
         guard ready, let appState else { return }
+        guard !isRelayingClock else { return }
         guard experimentalHidingEnabled else {
             restore()
             error = nil
@@ -176,6 +191,69 @@ final class NativeMenuBarManager: ObservableObject {
         restore()
         error = message
         logger.error("\(message, privacy: .public)")
+    }
+
+    private func handleClockEvent(_ event: NSEvent) {
+        guard let point = event.cgEvent?.location else { return }
+        if event.type != .leftMouseUp {
+            // A new click cancels delayed work, never swallows an unrelated mouse-up.
+            clockTask?.cancel()
+            clockMouseDown = nil
+            guard
+                event.type == .leftMouseDown, assertion != nil, experimentalHidingEnabled,
+                event.modifierFlags.isDisjoint(with: [.command, .option, .control, .shift])
+            else { return }
+            let displays = NSScreen.screens.compactMap { screen -> CGRect? in
+                guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
+                return CGDisplayBounds(id)
+            }
+            let bandHeight = NSScreen.screens.map { max(24, $0.safeAreaInsets.top) }.max() ?? 24
+            guard
+                NativeClockClickPolicy.isInMenuBar(point, displayBounds: displays, bandHeight: bandHeight),
+                !NativeClockAccessibility.notificationCenterIsOpen()
+            else { return }
+            clockMouseDown = (point, event.timestamp)
+            return
+        }
+        defer { clockMouseDown = nil }
+        guard
+            let down = clockMouseDown, clockTask == nil,
+            event.modifierFlags.isDisjoint(with: [.command, .option, .control, .shift]),
+            NativeClockClickPolicy.isClick(from: down.point, to: point, elapsed: event.timestamp - down.time)
+        else { return }
+        let requestRevision = revision
+        clockTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.isRelayingClock = false
+                self.clockTask = nil
+                self.applyVisibility()
+            }
+            guard
+                await self.clockReader.prepare(at: point), !Task.isCancelled,
+                self.revision == requestRevision, self.assertion != nil,
+                self.experimentalHidingEnabled
+            else { return }
+            self.isRelayingClock = true
+            self.restore()
+            let relayRevision = self.revision
+            // MenuBarAgent applies invalidation asynchronously. The user's original
+            // mouse-up has already been delivered; no synthetic mouse events are needed.
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                guard self.revision == relayRevision else { return }
+                for attempt in 1...2 {
+                    guard !Task.isCancelled, self.revision == relayRevision else { return }
+                    if NativeClockAccessibility.notificationCenterIsOpen() { break }
+                    let pressed = await self.clockReader.press()
+                    self.logger.info("Clock Accessibility action \(attempt) sent: \(pressed)")
+                    try await Task.sleep(for: .milliseconds(300))
+                }
+                let opened = NativeClockAccessibility.notificationCenterIsOpen()
+                self.logger.info("Clock relay finished; Notification Center visible: \(opened)")
+            } catch { }
+            await self.clockReader.clear()
+        }
     }
 
     private func restore() {
